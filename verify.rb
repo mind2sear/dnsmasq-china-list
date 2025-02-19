@@ -6,7 +6,6 @@ require 'ipaddr'
 require 'public_suffix'
 require 'resolv'
 
-
 class ChinaListVerify
     def initialize(
         dns=nil,
@@ -127,7 +126,7 @@ class ChinaListVerify
         begin
             tld_ns = get_ns_for_tld(PublicSuffix.parse(domain, ignore_private: true).tld)
         rescue PublicSuffix::DomainNotAllowed, PublicSuffix::DomainInvalid
-            yield nil, "Domain #{domain} isn't a valid domain"
+            yield nil, "Invalid domain #{domain}"
             return nil
         end
         response, glue = self.resolve(
@@ -224,6 +223,35 @@ class ChinaListVerify
     end
 end
 
+# Operates on the raw file to preserve commented out lines
+def CheckRedundant(lines, disabled_lines, domain)
+    new_line = "server=/#{domain}/114.114.114.114\n"
+    disabled_line = "#server=/#{domain}/114.114.114.114"
+    if lines.include? new_line
+        puts "Domain already exists: #{domain}"
+        return false
+    elsif disabled_lines.any? { |line| line.start_with? disabled_line }
+        puts "Domain already disabled: #{domain}"
+        return false
+    else
+        # Check for duplicates
+        test_domain = domain
+        while test_domain.include? '.'
+            test_domain = test_domain.partition('.').last
+            _new_line = "server=/#{test_domain}/114.114.114.114\n"
+            _disabled_line = "#server=/#{test_domain}/114.114.114.114"
+            if lines.include? _new_line 
+                puts "Redundant domain already exists: #{test_domain}"
+                return false
+            elsif disabled_lines.any? { |line| line.start_with? _disabled_line }
+                puts "Redundant domain already disabled: #{test_domain}"
+                return false
+            end
+        end
+    end
+    return new_line
+end
+
 if __FILE__ == $0
     require 'optparse'
     require 'ostruct'
@@ -266,7 +294,7 @@ if __FILE__ == $0
     v = ChinaListVerify.new options.dns
 
     if options.domain
-        v.check_domain_verbose(options.domain, show_green: options.verbose)
+        exit v.check_domain_verbose(options.domain, show_green: options.verbose) == true
     else
         v.check_domain_list(options.file, sample: options.sample, show_green: options.verbose)
     end
